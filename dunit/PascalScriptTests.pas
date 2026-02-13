@@ -35,14 +35,16 @@ type
     procedure Test_SafeCall;
     procedure Test_Registry;
     procedure Test_Tag;
+    procedure Test_BadVariableType_BizApp;
   end;
 
 implementation
 
 uses
-  Winapi.ActiveX, System.Win.ComObj,
-  uPSC_classes, uPSC_comobj, uPSC_controls, uPSC_stdctrls, uPSComponent_Default,
-  uPSI_Registry, uPSR_classes, uPSR_comobj, uPSR_controls, uPSR_stdctrls;
+  Winapi.ActiveX, System.Win.ComObj, Data.DB, Datasnap.DBClient,
+  uPSC_DB, uPSC_classes, uPSC_comobj, uPSC_controls, uPSC_stdctrls,
+  uPSComponent_Default, uPSI_Registry, uPSR_DB, uPSR_classes, uPSR_comobj,
+  uPSR_controls, uPSR_stdctrls;
 
 function SafeCall_Sum(a, b: Integer): Integer; safecall;
 begin
@@ -87,6 +89,10 @@ begin
   SIRegister_ComObj(x);
   SIRegister_Controls(x);
   SIRegister_StdCtrls(x);
+  SIRegister_DB(x);
+
+  with x.AddClassN(x.FindClass(AnsiString(TDataSet.ClassName)), AnsiString(TClientDataSet.ClassName)) do
+    RegisterMethod('procedure CreateDataSet');
 end;
 
 procedure TPascalScriptTests.OnExecImport(Sender: TObject; se: TPSExec;
@@ -99,6 +105,10 @@ begin
   RIRegister_ComObj(se);
   RIRegister_Controls(x);
   RIRegister_StdCtrls(x);
+  RIRegister_DB(x);
+
+  with x.Add(TClientDataSet) do
+    RegisterMethod(@TClientDataSet.CreateDataSet, 'CreateDataSet');
 end;
 
 procedure TPascalScriptTests.TearDown;
@@ -371,6 +381,41 @@ begin
     function Execute: string;
     begin
       Result := IntToStr(SafeCall_Sum(10, 20));
+    end;
+    ''')
+  );
+end;
+
+procedure TPascalScriptTests.Test_BadVariableType_BizApp;
+begin
+  {$ifndef PS_USECLASSICINVOKE}Check(False, 'Define PS_USECLASSICINVOKE for Win32 build');{$endif}
+
+  CheckEquals(
+    '1'
+  , Execute<string>('''
+    function Execute: string;
+    var o, B, D: Variant;
+        C: TClientDataSet;
+    begin
+      C := TClientDataSet.Create(nil);
+      o := CreateOleObject('SQLAcc.BizApp');
+      B := o.BizObjects.Find('AR_IV');
+      D := B.DataSets.Find('MainDataSet');
+      try
+        C.FieldDefs.Add('DocAmt', ftFMTBcd, 2, False);
+        C.FieldDefs.Find('DocAmt').Precision := 18;
+        C.CreateDataSet;
+        C.AppendRecord([100]);
+
+        B.New;
+        D.FindField('DocAmt').Value := C.FindField('DocAmt').Value;
+      finally
+        C.Free;
+        o := Null;
+        B := Null;
+        D := Null;
+      end;
+      Result := '1';
     end;
     ''')
   );
